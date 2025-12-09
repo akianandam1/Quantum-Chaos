@@ -1,29 +1,33 @@
 #!/usr/bin/env python3
 """
-channel_modes_energy_from_E.py
+channel_modes_energy_from_E_sorted.py
 
-For each eigenstate:
-  - Compute w_12 (small+channel vs large, normalized by classical area fractions).
-  - Compute x_j from energy only:
-        x_j = N_perp_max(E_j) = floor(W_eff * sqrt(E_j) / pi),
-    where W_eff is a user-specified effective channel width in grid units.
+Like channel_modes_energy_from_E.py, but ensures that eigenstates are processed
+in order of *increasing energy*, even if the eigenpairs.h5 file is not sorted.
 
-Processes states in windows and reports:
-  - average x per window
-  - average <w_12> per window
+Key changes vs original:
+  - After loading evals from the H5 file, we compute a sorted index array:
+        sort_idx = np.argsort(evals)
+    which gives the order of eigenstates from lowest to highest energy.
 
-Also prints every PRINT_EVERY-th eigenstate index, x_j, and w_12(j) for sanity.
+  - All batch/window processing is then done in terms of this *sorted* order:
+        sorted_start = START_INDEX + w * WINDOW_SIZE
+        window_sorted_indices = sort_idx[sorted_start:sorted_end]
 
-Relies on:
-  - SDF npz: with phi, allowed
-  - RGB-labelled PNG: red=small, green=channel, blue=large
-  - eigenpairs.h5: evals[K], evecs[n,K] from lowband_complete_solver.py
+  - For each window we pull the corresponding evecs columns via fancy indexing:
+        evecs = hf["evecs"][:, window_sorted_indices]
+
+  - The original H5 file is NOT modified; we only change the order in which
+    we *read* and process eigenpairs.
+
+Everything else (geometry, masks, w_12 computation, x(E), outputs) is the same.
 """
 
 import os
 import numpy as np
 import h5py
 import matplotlib.pyplot as plt
+
 
 # ===================== USER CONFIG =====================
 
@@ -34,21 +38,24 @@ CONFIG = {
     "GEOM_PREVIEW_PNG": r"eigensdf/doublewell/trial2/region_masks_preview.png",
 
     # Eigenpairs
-    "H5_PATH": r"eigensdf/doublewell/trial2/eigenpairs_sorted_5000.h5",
+    "H5_PATH": r"eigensdf/doublewell/trial2/eigenpairs.h5",
     "OUT_DIR": r"eigensdf/doublewell/trial2/roland",
 
     # Eigenstate processing
-    "START_INDEX": 100,    # first eigenstate index (0-based) to consider
-    "WINDOW_SIZE": 100,      # states per window
+    # START_INDEX is now interpreted in *sorted-energy* order:
+    #   0 means "start from the absolute ground state",
+    #   100 means "skip the lowest 100 energies and start from the 101st".
+    "START_INDEX": 100,    # first eigenstate rank (0-based) in energy-sorted order
+    "WINDOW_SIZE": 100,      # states per window (in sorted order)
     "NUM_WINDOWS": 400,      # number of windows
     "MIN_REL_FRAC": 0.0,    # optional crude chaoticity filter (0 to disable)
 
     # Effective channel width (in grid units / pixels)
-    # Measure this by hand (e.g. count allowed pixels across the entrance in your PNG). #potential 8 was 64 pixels, potential 12 was 16 pixels
+    # Measure this by hand (e.g. count allowed pixels across the entrance in your PNG).
     "W_EFF": 64.0,
 
     # Printing
-    "PRINT_EVERY": 10,     # print x,w12 for every N-th state (global index)
+    "PRINT_EVERY": 10,     # print x,w12 for every N-th state (in sorted rank)
 
     # Output
     "PLOT_PATH": r"eigensdf/doublewell/trial2/roland/partial_barrier_curve.png",
@@ -69,6 +76,7 @@ def load_npz(npz_path):
         allowed = (phi > 0)
     return phi, allowed
 
+
 def show_preview_masks(small_mask, channel_mask, large_mask, preview_path=None):
     if preview_path is None:
         return
@@ -86,6 +94,7 @@ def show_preview_masks(small_mask, channel_mask, large_mask, preview_path=None):
     fig.tight_layout()
     fig.savefig(preview_path, bbox_inches="tight")
     plt.close(fig)
+
 
 def partition_manual_from_png(label_png, phi_shape, preview_path=None):
     """Use RGB-labelled PNG: red->small, green->channel, blue->large."""
@@ -117,6 +126,7 @@ def partition_manual_from_png(label_png, phi_shape, preview_path=None):
 
     show_preview_masks(small_mask, channel_mask, large_mask, preview_path)
     return small_mask, channel_mask, large_mask
+
 
 def load_geometry_and_region_masks(cfg):
     phi, allowed = load_npz(cfg["NPZ_PATH"])
@@ -154,9 +164,24 @@ def load_geometry_and_region_masks(cfg):
 # -------------------- EIGENSTATES / w12 + x(E) -------------------- #
 
 def load_eigenpairs(h5_path):
+    """
+    Return the open HDF5 file handle and the raw (unsorted) eigenvalues.
+    """
     f = h5py.File(h5_path, "r")
     evals = np.array(f["evals"][:], dtype=np.float64)
     return f, evals
+
+
+def sort_eigenvalues(evals):
+    """
+    Given evals[k], return (evals_sorted, sort_idx) where:
+      evals_sorted[k_sorted] = evals[sort_idx[k_sorted]]
+    sort_idx is a permutation that orders evals in ascending energy.
+    """
+    sort_idx = np.argsort(evals)
+    evals_sorted = evals[sort_idx]
+    return evals_sorted, sort_idx
+
 
 def unpack_evec(vec, allowed_mask, shape):
     Ny, Nx = shape
@@ -164,32 +189,65 @@ def unpack_evec(vec, allowed_mask, shape):
     psi[allowed_mask] = vec.reshape(-1)
     return psi
 
-def process_window_energy_x_w12(hf,
-                                evals,
-                                allowed,
-                                mask_small_combined,
-                                mask_large,
-                                mu_small_cl,
-                                mu_large_cl,
-                                shape,
-                                idx_start,
-                                window_size,
-                                W_eff,
-                                min_rel_frac=0.0,
-                                print_every=200,
-                                global_offset=0):
-    """
-    For eigenstates [idx_start, idx_start+window_size), compute:
 
-      - w_12 for each state
-      - x_j = N_perp_max(E_j) = floor(W_eff * sqrt(E_j) / pi)
-
-    Returns:
-      - arrays of energies, w12, x, and the indices actually kept
+def process_window_energy_x_w12_sorted(hf,
+                                       evals,
+                                       allowed,
+                                       mask_small_combined,
+                                       mask_large,
+                                       mu_small_cl,
+                                       mu_large_cl,
+                                       shape,
+                                       window_sorted_indices,
+                                       W_eff,
+                                       min_rel_frac=0.0,
+                                       print_every=200,
+                                       sorted_offset=0):
     """
-    idx_end = min(idx_start + window_size, evals.size)
-    evecs = np.array(hf["evecs"][:, idx_start:idx_end], dtype=np.complex128)
-    K = evecs.shape[1]
+    Process a window of eigenstates given by window_sorted_indices, which is an
+    array of *original* eigenstate indices, but ordered so that the
+    corresponding energies are increasing.
+
+    Parameters
+    ----------
+    hf : h5py.File
+        Open HDF5 file containing 'evecs' dataset (shape [n, K]).
+    evals : np.ndarray
+        Raw (unsorted) eigenvalues, evals[K].
+    allowed : np.ndarray (bool)
+        Mask of allowed grid cells.
+    mask_small_combined, mask_large : np.ndarray (bool)
+        Region masks for (small+channel) and large well.
+    mu_small_cl, mu_large_cl : float
+        Classical area fractions of those regions.
+    shape : (Ny, Nx)
+        Grid shape.
+    window_sorted_indices : array_like of int
+        Original indices of the eigenstates in this window, in increasing energy.
+    W_eff : float
+        Effective channel width (grid units).
+    min_rel_frac : float, optional
+        Crude chaoticity filter (0 to disable).
+    print_every : int, optional
+        Print every N-th state with respect to its *sorted rank*.
+    sorted_offset : int, optional
+        The starting rank in the global sorted ordering (for pretty printing).
+
+    Returns
+    -------
+    E_arr : np.ndarray
+        Energies of the states actually kept.
+    w12_arr : np.ndarray
+        w_12 values.
+    x_arr : np.ndarray
+        x(E) values.
+    idx_arr : np.ndarray (int)
+        Original eigenstate indices (columns in evecs dataset) of the states kept.
+    """
+    # Make sure indices are a 1D, increasing integer array (extra safety)
+    orig_indices = np.sort(np.asarray(window_sorted_indices, dtype=int))
+    if orig_indices.size == 0:
+        return (np.array([]), np.array([]), np.array([]), np.array([], dtype=int))
 
     Ny, Nx = shape
     w_list = []
@@ -197,14 +255,21 @@ def process_window_energy_x_w12(hf,
     e_list = []
     idx_list = []
 
-    for j in range(K):
-        global_idx = idx_start + j
-        E_j = evals[global_idx]
+    for j, orig_idx in enumerate(orig_indices):
+        # sorted rank of this state in the *global* energy ordering
+        sorted_rank = sorted_offset + j
+
+        # original index into evals and evecs
+        orig_idx = int(orig_idx)
+
+        E_j = evals[orig_idx]
         if E_j <= 0:
             # skip pathological or non-physical E
             continue
 
-        v = evecs[:, j]
+        # Read this eigenvector column individually to avoid h5py fancy-indexing issues
+        v = hf["evecs"][:, orig_idx].astype(np.complex128)
+
         psi = unpack_evec(v, allowed, shape)
         dens = np.abs(psi) ** 2
         tot = dens[allowed].sum()
@@ -224,19 +289,20 @@ def process_window_energy_x_w12(hf,
         r2 = p_large / mu_large_cl
         w12 = r1 * r2
 
-        # x_j = N_perp_max(E_j) = floor(W_eff * sqrt(E_j) / pi)
+        # x_j = N_perp_max(E_j) = W_eff * sqrt(E_j) / pi
         k_j = np.sqrt(E_j)   # assuming -∇^2 ψ = E ψ
         x_j = W_eff * k_j / np.pi
         if x_j < 0:
-            x_j = 0
+            x_j = 0.0
 
-        if print_every > 0 and ((global_idx - global_offset) % print_every == 0):
-            print(f"  state {global_idx}: x(E)={x_j:.3f}, w12={w12:.3f}, E={E_j:.3f}")
+        if print_every > 0 and (sorted_rank % print_every == 0):
+            print(f"  sorted_rank {sorted_rank} (orig {orig_idx}): x(E)={x_j:.3f}, "
+                  f"w12={w12:.3f}, E={E_j:.3f}")
 
         w_list.append(w12)
         x_list.append(x_j)
         e_list.append(E_j)
-        idx_list.append(global_idx)
+        idx_list.append(orig_idx)
 
     if not w_list:
         return (np.array([]), np.array([]), np.array([]), np.array([], dtype=int))
@@ -245,6 +311,7 @@ def process_window_energy_x_w12(hf,
             np.array(w_list, dtype=float),
             np.array(x_list, dtype=float),
             np.array(idx_list, dtype=int))
+
 
 
 # --------------------------- MAIN --------------------------- #
@@ -268,18 +335,32 @@ def main():
     # eigenpairs
     hf, evals = load_eigenpairs(cfg["H5_PATH"])
     total_states = evals.size
-    print(f"[eig] total eigenvalues: {total_states}")
+    print(f"[eig] total eigenvalues (raw order): {total_states}")
 
-    start_index = int(cfg["START_INDEX"])
+    # sort eigenvalues by energy (ascending)
+    evals_sorted, sort_idx = sort_eigenvalues(evals)
+    print("[eig] eigenvalues will be processed in ascending energy order.")
+    if total_states > 0:
+        print(f"[eig] lowest few energies (sorted): {evals_sorted[:5]}")
+
+    start_index = int(cfg["START_INDEX"])    # in sorted order
     window_size = int(cfg["WINDOW_SIZE"])
     num_windows = int(cfg["NUM_WINDOWS"])
     min_rel_frac = float(cfg["MIN_REL_FRAC"])
     print_every = int(cfg["PRINT_EVERY"])
 
-    max_idx = start_index + window_size * num_windows
-    if max_idx > total_states:
+    if start_index < 0:
+        start_index = 0
+    if start_index >= total_states:
+        print(f"[error] START_INDEX={start_index} is >= total_states={total_states}. Nothing to do.")
+        hf.close()
+        return
+
+    # Check we don't run past the total number of states when stepping in sorted order
+    max_idx_sorted = start_index + window_size * num_windows
+    if max_idx_sorted > total_states:
         max_windows = (total_states - start_index) // window_size
-        print(f"[warn] requested up to idx {max_idx}, but only {total_states} states.")
+        print(f"[warn] requested up to sorted index {max_idx_sorted}, but only {total_states} states.")
         print(f"[info] reducing NUM_WINDOWS -> {max_windows}")
         num_windows = max_windows
 
@@ -289,13 +370,20 @@ def main():
     all_indices = []
     window_stats = []
 
-    global_offset = start_index
+    # global offset for print_every (in sorted order)
+    global_sorted_offset = start_index
 
     for w in range(num_windows):
-        idx_start = start_index + w * window_size
-        print(f"\n[window] {w}: indices [{idx_start}, {idx_start + window_size})")
+        sorted_start = start_index + w * window_size
+        sorted_end = min(sorted_start + window_size, total_states)
 
-        E_arr, w12_arr, x_arr, idx_arr = process_window_energy_x_w12(
+        print(f"\n[window] {w}: sorted ranks [{sorted_start}, {sorted_end}) "
+              f"(size={sorted_end - sorted_start})")
+
+        # original indices of the states in this window, in ascending energy
+        window_sorted_indices = sort_idx[sorted_start:sorted_end]
+
+        E_arr, w12_arr, x_arr, idx_arr = process_window_energy_x_w12_sorted(
             hf,
             evals,
             allowed,
@@ -304,12 +392,11 @@ def main():
             mu_small_cl,
             mu_large_cl,
             shape,
-            idx_start,
-            window_size,
+            window_sorted_indices,
             W_eff,
             min_rel_frac=min_rel_frac,
             print_every=print_every,
-            global_offset=global_offset,
+            sorted_offset=sorted_start  # for pretty printing
         )
 
         if E_arr.size == 0:
@@ -320,7 +407,8 @@ def main():
         mean_x = float(x_arr.mean())
         print(f"  window mean: x(E)={mean_x:.3f}, <w_12>={mean_w:.3f}")
 
-        window_stats.append((idx_start, idx_start + window_size, mean_x, mean_w))
+        # Store per-window stats in terms of sorted ranks
+        window_stats.append((sorted_start, sorted_end, mean_x, mean_w))
 
         all_E.append(E_arr)
         all_w12.append(w12_arr)
@@ -330,7 +418,7 @@ def main():
     hf.close()
 
     if not all_w12:
-        print("[error] no data produced; check masks/indices.")
+        print("[error] no data produced; check masks/indices/filters.")
         return
 
     all_E = np.concatenate(all_E)
@@ -339,14 +427,13 @@ def main():
     all_indices = np.concatenate(all_indices)
     window_stats = np.array(window_stats, dtype=float)
 
-
     # Arrays of per-window mean x and mean w_12
     mean_x_per_window = window_stats[:, 2]
     mean_w_per_window = window_stats[:, 3]
 
-    print("\n[windows] mean x(E) per window:")
+    print("\n[windows] mean x(E) per window (sorted-energy windows):")
     print(mean_x_per_window.tolist())
-    print("\n[windows] mean w_12 per window:")
+    print("\n[windows] mean w_12 per window (sorted-energy windows):")
     print(mean_w_per_window.tolist())
 
     # Overall averages
@@ -360,8 +447,8 @@ def main():
         E=all_E,
         w12=all_w12,
         x=all_x,
-        indices=all_indices,
-        window_stats=window_stats,
+        indices=all_indices,       # original eigenstate indices in the H5 file
+        window_stats=window_stats, # [sorted_start, sorted_end, mean_x, mean_w]
         W_eff=W_eff,
     )
     print(f"[save] wrote data to {cfg['DATA_OUT_NPZ']}")
@@ -375,6 +462,7 @@ def main():
     plt.savefig(cfg["PLOT_PATH"], bbox_inches="tight")
     plt.close()
     print(f"[plot] saved {cfg['PLOT_PATH']}")
+
 
 if __name__ == "__main__":
     main()
