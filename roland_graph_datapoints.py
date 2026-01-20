@@ -33,13 +33,13 @@ import matplotlib.pyplot as plt
 
 CONFIG = {
     # SDF and labels
-    "NPZ_PATH": r"potentials/potential8.npz",  # SDF npz (phi, allowed)
-    "LABEL_PNG": r"potentials/labeled_potential8.png",  # RGB-labelled regions
-    "GEOM_PREVIEW_PNG": r"eigensdf/doublewell/trial2/region_masks_preview.png",
+    "NPZ_PATH": r"potentials/final_potential.npz",  # SDF npz (phi, allowed)
+    "LABEL_PNG": r"potentials/labelled_final_potential.png",  # RGB-labelled regions
+    "GEOM_PREVIEW_PNG": r"eigensdf/doublewell/final2/roland/region_masks_preview.png",
 
     # Eigenpairs
-    "H5_PATH": r"eigensdf/doublewell/trial2/eigenpairs.h5",
-    "OUT_DIR": r"eigensdf/doublewell/trial2/roland",
+    "H5_PATH": r"eigensdf/doublewell/final2/eigenpairs.h5",
+    "OUT_DIR": r"eigensdf/doublewell/final2/roland",
 
     # Eigenstate processing
     # START_INDEX is now interpreted in *sorted-energy* order:
@@ -47,7 +47,7 @@ CONFIG = {
     #   100 means "skip the lowest 100 energies and start from the 101st".
     "START_INDEX": 100,    # first eigenstate rank (0-based) in energy-sorted order
     "WINDOW_SIZE": 100,      # states per window (in sorted order)
-    "NUM_WINDOWS": 400,      # number of windows
+    "NUM_WINDOWS": 498,      # number of windows
     "MIN_REL_FRAC": 0.0,    # optional crude chaoticity filter (0 to disable)
 
     # Effective channel width (in grid units / pixels)
@@ -58,8 +58,8 @@ CONFIG = {
     "PRINT_EVERY": 10,     # print x,w12 for every N-th state (in sorted rank)
 
     # Output
-    "PLOT_PATH": r"eigensdf/doublewell/trial2/roland/partial_barrier_curve.png",
-    "DATA_OUT_NPZ": r"eigensdf/doublewell/trial2/roland/partial_barrier_data.npz",
+    "PLOT_PATH": r"eigensdf/doublewell/final2/roland/partial_barrier_curve.png",
+    "DATA_OUT_NPZ": r"eigensdf/doublewell/final2/roland/partial_barrier_data.npz",
 }
 
 # =======================================================

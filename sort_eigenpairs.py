@@ -19,13 +19,13 @@ import h5py
 
 CONFIG = {
     # Path to the original eigenpairs file (will be opened read-only)
-    "H5_IN_PATH": r"eigensdf/doublewell/roland_narrow1/eigenpairs.h5",
+    "H5_IN_PATH": r"eigensdf/doublewell/trial2/eigenpairs.h5",
 
     # Path for the new, sorted eigenpairs file
-    "H5_OUT_PATH": r"eigensdf/doublewell/roland_narrow1/eigenpairs_sorted.h5",
+    "H5_OUT_PATH": r"eigensdf/doublewell/trial2/eigenpairs_sorted_15000.h5",
 
     # How many lowest-energy eigenstates to keep
-    "MAX_STATES": 4000,
+    "MAX_STATES": 15000,
 
     # If the output file already exists:
     #   - if True: overwrite it

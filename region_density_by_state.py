@@ -20,16 +20,19 @@
 
 
 # baseline 1/Total Area = 3.033318e-06
+# New baseline 1/Total Area = 4.474633e-06
+# New New baseline 1/Total Area = 4.462911e-06
 
 CONFIG = {
     "REGION_MODE": "manual_label_png",   # "manual_label_png" or "component_split"
-    "NPZ_PATH": r"potentials/potential11.npz",
-    "LABEL_PNG": "potentials/potential11_labelled.png",
+    "NPZ_PATH": r"potentials/final_obstacles.npz",
+    "LABEL_PNG": "potentials/labelled_final_obstacles.png",
     "CHANNEL_RADIUS": 9.0,               # for component_split only
 
-    "H5_PATH":  r"eigensdf/doublewell/potential11/trial1/eigenpairs.h5",
+    "H5_PATH":  r"eigensdf/doublewell/finalobstacles/eigenpairs.h5",
+    "E_CUT": 20,                        # Only analyze eigenstates with energy <= E_CUT. Set None to disable.
 
-    "OUT_DIR": r"eigensdf/doublewell/potential11/trial1",
+    "OUT_DIR": r"eigensdf/doublewell/finalobstacles",
     "BATCH": 100,
     "PROGRESS_EVERY": 100,
     "PREVIEW": True,
@@ -139,7 +142,7 @@ def partition_component_split(phi, allowed, channel_radius=9.0, preview_path=Non
     show_preview_masks(small_mask, channel, large_mask, preview_path)
     return small_mask, channel, large_mask
 
-def compute_region_densities(h5_path, idx_small, idx_chan, idx_large, areas, batch=1024, progress_every=0, out_csv=None, out_parquet=None):
+def compute_region_densities(h5_path, idx_small, idx_chan, idx_large, areas, batch=1024, progress_every=0, out_csv=None, out_parquet=None, e_cut=None):
     A_small, A_chan, A_large, A_tot = areas
     baseline = 1.0 / float(A_tot)
 
@@ -149,17 +152,41 @@ def compute_region_densities(h5_path, idx_small, idx_chan, idx_large, areas, bat
         evecs = f["evecs"]
         n_pts, K = evecs.shape
 
+        # Select eigenstate indices to process
+        if e_cut is None:
+            idx_keep = np.arange(K, dtype=np.int64)
+        else:
+            e_cut = float(e_cut)
+            keep = np.isfinite(evals) & (evals <= e_cut)
+            idx_keep = np.where(keep)[0].astype(np.int64)
+
+        K_keep = int(idx_keep.size)
+        if K_keep == 0:
+            print(f"[info] No eigenstates with energy <= {e_cut}. Nothing to do.")
+            return rows
+
+        # Fast path: if we're just taking the first K_keep columns, we can slice instead of fancy-index.
+        is_prefix = np.array_equal(idx_keep, np.arange(K_keep, dtype=np.int64))
+
         processed = 0
-        for i0 in range(0, K, batch):
-            i1 = min(K, i0+batch)
-            V = np.array(evecs[:, i0:i1], dtype=np.complex128)
+        for j0 in range(0, K_keep, batch):
+            j1 = min(K_keep, j0 + batch)
+            if is_prefix:
+                V = np.array(evecs[:, j0:j1], dtype=np.complex128)
+                col_indices = np.arange(j0, j1, dtype=np.int64)
+            else:
+                col_indices = idx_keep[j0:j1]
+                # h5py requires increasing order for fancy indexing; idx_keep is already increasing
+                V = np.array(evecs[:, col_indices], dtype=np.complex128)
+
             P = np.abs(V)**2
             s = P.sum(axis=0) + 1e-20
             P = P / s
 
-            frac_small = P[idx_small, :].sum(axis=0) if idx_small.size else np.zeros((i1-i0,))
-            frac_chan  = P[idx_chan,  :].sum(axis=0) if idx_chan.size  else np.zeros((i1-i0,))
-            frac_large = P[idx_large, :].sum(axis=0) if idx_large.size else np.zeros((i1-i0,))
+            ncols = int(P.shape[1])
+            frac_small = P[idx_small, :].sum(axis=0) if idx_small.size else np.zeros((ncols,))
+            frac_chan  = P[idx_chan,  :].sum(axis=0) if idx_chan.size  else np.zeros((ncols,))
+            frac_large = P[idx_large, :].sum(axis=0) if idx_large.size else np.zeros((ncols,))
 
             avg_small = frac_small / max(A_small, 1)
             avg_chan  = frac_chan  / max(A_chan,  1)
@@ -169,8 +196,8 @@ def compute_region_densities(h5_path, idx_small, idx_chan, idx_large, areas, bat
             ratio_chan  = avg_chan  / baseline
             ratio_large = avg_large / baseline
 
-            for j in range(i1-i0):
-                idx = i0 + j
+            for j in range(ncols):
+                idx = int(col_indices[j])
                 e   = float(evals[idx]) if idx < len(evals) else None
                 rows.append((
                     idx, e,
@@ -180,9 +207,9 @@ def compute_region_densities(h5_path, idx_small, idx_chan, idx_large, areas, bat
                     float(baseline)
                 ))
 
-            processed += (i1 - i0)
+            processed += ncols
             if progress_every and (processed % progress_every == 0):
-                print(f"[Progress] processed {processed}/{K} eigenstates...", flush=True)
+                print(f"[Progress] processed {processed}/{K_keep} eigenstates...", flush=True)
 
     if out_csv is not None:
         with open(out_csv, "w", newline="") as fp:
@@ -218,6 +245,7 @@ def main():
     REGION_MODE   = CONFIG["REGION_MODE"]
     NPZ_PATH      = CONFIG["NPZ_PATH"]
     H5_PATH       = CONFIG["H5_PATH"]
+    E_CUT         = CONFIG.get("E_CUT", None)
     LABEL_PNG     = CONFIG["LABEL_PNG"]
     CHANNEL_RADIUS= float(CONFIG["CHANNEL_RADIUS"])
     OUT_DIR       = CONFIG["OUT_DIR"]
@@ -259,11 +287,13 @@ def main():
         H5_PATH, idx_small, idx_chan, idx_large,
         areas=(A_small, A_chan, A_large, A_tot),
         batch=BATCH, progress_every=PROGRESS_EVERY,
-        out_csv=out_csv, out_parquet=out_parquet
+        out_csv=out_csv, out_parquet=out_parquet,
+        e_cut=E_CUT
     )
 
     summary = {
         "npz": NPZ_PATH, "h5": H5_PATH, "region_mode": REGION_MODE,
+        "E_CUT": E_CUT,
         "label_png": LABEL_PNG if REGION_MODE=="manual_label_png" else None,
         "channel_radius": CHANNEL_RADIUS if REGION_MODE=="component_split" else None,
         "areas": {"small": A_small, "channel": A_chan, "large": A_large, "total_allowed": A_tot},

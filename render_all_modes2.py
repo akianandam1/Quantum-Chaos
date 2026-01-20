@@ -4,9 +4,9 @@
 # Works with HDF5 (eigenpairs.h5) or NPZ shards (manifest.json).
 
 # ========= USER PARAMS =========
-OUT_DIR         = "eigensdf/doublewell/roland_narrow1"                      # where your store lives
-OUTPUT_DIR = "eigensdf/doublewell/roland_narrow1/sortedrenders"                    # where we output images
-SDF_PATH        = "potentials/potential8sdf.npz"     # fallback if geometry_used.npz not present
+OUT_DIR         = "eigensdf/doublewell/final"                      # where your store lives
+OUTPUT_DIR = "eigensdf/doublewell/final/renders2"                    # where we output images
+SDF_PATH        = "potentials/double_potential_final.npz"     # fallback if geometry_used.npz not present
 CONTOURS_PATH   = None  # e.g., "eigs_out/geometry_sdf_contours.npz" or None
 
 # What to render
@@ -16,9 +16,13 @@ RENDER_PROB     = True     # probability |psi|^2 montages with high contrast
 # Montage layout & look
 MONTAGE_COUNT   = 60       # modes per montage image
 MONTAGE_COLS    = 10
-MONTAGE_DPI     = 150
+MONTAGE_DPI     = 300
 ALPHA_OVERLAY   = 0.35     # blend eigenimage over occupancy background (0..1). Try 0.25–0.45.
 SHOW_BACKGROUND = True     # False -> pure field (no white/gray bg)
+
+# Sorting / energy display
+SORT_EIGENPAIRS = True     # if True, render in increasing energy order
+SORT_BY         = "real"   # "real" (Re(E)) or "abs" (|E|) for complex spectra
 
 # Probability contrast controls
 PROB_PCT_HI     = 99.5     # clip upper percentile (e.g., 99.0–99.9)
@@ -115,7 +119,13 @@ def save_modes_montage(evals, evecs, global_start, which):
 
             gidx = global_start + k
             ax.imshow(blend, origin='lower')
-            ax.set_title(f"#{gidx}  E≈{evals[k]:.6g}", fontsize=7)
+            Ek = evals[k]
+            # robust formatting for real/complex
+            if np.iscomplexobj(Ek):
+                title_E = f"Re={Ek.real:.6g}, Im={Ek.imag:.3g}"
+            else:
+                title_E = f"{float(Ek):.6g}"
+            ax.set_title(f"#{gidx}  E≈{title_E}", fontsize=7)
             ax.axis('off')
 
             # Optional overlay of φ=0 curve
@@ -136,23 +146,50 @@ def save_modes_montage(evals, evecs, global_start, which):
         print("wrote", out)
 
 # ---------- detect backend and render ----------
-h5_path = os.path.join(OUT_DIR, "eigenpairs_sorted.h5")
+H5_CANDIDATES = [
+    os.path.join(OUT_DIR, "eigenpairs_complex.h5"),
+    os.path.join(OUT_DIR, "eigenpairs.h5"),
+    os.path.join(OUT_DIR, "eigenpairs_sorted.h5"),
+]
+h5_path = next((p for p in H5_CANDIDATES if os.path.exists(p)), None)
 man_path = os.path.join(OUT_DIR, "manifest.json")
 
-if os.path.exists(h5_path):
+if h5_path and os.path.exists(h5_path):
     try:
         import h5py
     except ImportError:
         raise SystemExit("HDF5 store found but h5py not installed. pip install h5py")
 
     with h5py.File(h5_path, "r") as h5:
-        K = int(h5["evals"].shape[0])
+        evals_all = np.array(h5["evals"][:])
+        K = int(evals_all.shape[0])
+        print(f"[store:h5] using: {h5_path}")
         print(f"[store:h5] total modes: {K}")
+
+        if SORT_EIGENPAIRS:
+            if SORT_BY == "abs":
+                key = np.abs(evals_all)
+            else:
+                key = np.real(evals_all)
+            order = np.argsort(key)
+            print(f"[store:h5] sorting eigenpairs by {SORT_BY}(E) (ascending)")
+        else:
+            order = np.arange(K, dtype=np.int64)
+            print("[store:h5] rendering in stored order (no sorting)")
+
         CHUNK = 240  # render in manageable blocks
         for start in range(0, K, CHUNK):
-            end = min(start+CHUNK, K)
-            E = np.array(h5["evals"][start:end])
-            V = np.array(h5["evecs"][:, start:end])
+            end = min(start + CHUNK, K)
+            idxs = order[start:end]
+            # Pull columns in one go.
+            # NOTE: h5py requires fancy indices to be in increasing order, so we read
+            # them sorted and then permute back to the desired (energy-sorted) order.
+            E = evals_all[idxs]
+            sort_perm = np.argsort(idxs)           # idxs_sorted = idxs[sort_perm]
+            idxs_sorted = idxs[sort_perm]
+            V_sorted = np.array(h5["evecs"][:, idxs_sorted])
+            inv_perm = np.argsort(sort_perm)       # undo the sort, back to idxs order
+            V = V_sorted[:, inv_perm]
             if RENDER_REAL:
                 save_modes_montage(E, V, global_start=start, which="real")
             if RENDER_PROB:
@@ -163,6 +200,9 @@ elif os.path.exists(man_path):
         man = json.load(f)
     shards = man.get("shards", [])
     print(f"[store:npz] shards: {len(shards)}")
+    if SORT_EIGENPAIRS:
+        print("[warn] NPZ-shard backend detected; this script currently renders shards in stored order.")
+        print("       If you need sorting here too, tell me and I’ll add a sorted-index pass over shards.")
     for sh in shards:
         start = int(sh["start"]); stop = int(sh["stop"])
         npz = os.path.join(OUT_DIR, sh["path"])

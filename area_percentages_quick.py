@@ -9,11 +9,11 @@
 #
 CONFIG = {
     "REGION_MODE": "manual_label_png",   # "manual_label_png" or "component_split"
-    "NPZ_PATH": r"potentials/potential12.npz",
-    "LABEL_PNG": r"potentials/potential12_labelled.png",# if manual_label_png: 0 bg, 1 small, 2 channel, 3 large (or pure RGB)
+    "NPZ_PATH": r"potentials/final_potential.npz",
+    "LABEL_PNG": r"potentials/labelled_final_potential.png",# if manual_label_png: 0 bg, 1 small, 2 channel, 3 large (or pure RGB)
     "CHANNEL_RADIUS": 9.0,               # for component_split only
 
-    "OUT_DIR": r"eigensdf/doublewell/roland_narrow1",
+    "OUT_DIR": r"eigensdf/doublewell/final",
     "PREVIEW": True,                     # save region_masks.png
 }
 

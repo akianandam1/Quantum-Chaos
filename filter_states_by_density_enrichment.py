@@ -16,9 +16,9 @@
 #
 # --------------------- CONFIG: edit here ---------------------
 CONFIG = {
-    "CSV_PATH": r"eigensdf/doublewell/potential9/trial1/region_avg_densities_by_state.csv",
-    "OUT_DIR":  r"eigensdf/doublewell/potential9/trial1",
-    "CUTOFF_MULT": 1.3,          # e.g. 1.5 means 50% above uniform baseline
+    "CSV_PATH": r"eigensdf/doublewell/finalobstacles/region_avg_densities_by_state.csv",
+    "OUT_DIR":  r"eigensdf/doublewell/finalobstacles",
+    "CUTOFF_MULT": 1.6,          # e.g. 1.5 means 50% above uniform baseline
     "CLASSIFY_MODE": "nonexclusive",  # "nonexclusive" or "argmax" (sets which headline to print first)
     "SAVE_MATCHES_CSV": True,
 }

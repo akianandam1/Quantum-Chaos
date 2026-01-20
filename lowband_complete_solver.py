@@ -17,10 +17,10 @@ from scipy.sparse import coo_matrix, csr_matrix, eye
 from scipy.sparse.linalg import splu, eigsh
 
 # ========= USER PARAMS =========
-SDF_PATH      = "potentials/potential12.npz"   # your φ (signed distance) NPZ (from png_to_sdf)
-OUT_DIR       = "eigensdf/doublewell/roland_narrow1"           # new output directory (do NOT reuse old one)
-E_CUT         = 1                          # collect all modes with E <= E_CUT
-N_TARGET      = 8000                          # or set e.g. 12000 to stop at count instead of E_CUT
+SDF_PATH      = "potentials/final_obstacles.npz"   # your φ (signed distance) NPZ (from png_to_sdf)
+OUT_DIR       = "eigensdf/doublewell/finalobstacles"           # new output directory (do NOT reuse old one)
+E_CUT         = 3                          # collect all modes with E <= E_CUT
+N_TARGET      = 10_000                          # or set e.g. 12000 to stop at count instead of E_CUT
 SIGMA_GRID    = np.arange(0.0, 3.0, 0.25)     # initial σ sweep (you can widen to E_CUT+margin)
 K_BATCH       = 256                           # how many to ask per ARPACK call
 TOL_E         = 1e-8                          # energy tolerance for dedup
@@ -197,7 +197,7 @@ def main():
             weyl_est = (area/(4*np.pi))*E_CUT
             have_below = int((E_store <= E_CUT).sum())
             print(f"[weyl] have_below={have_below}, est≈{weyl_est:.1f}")
-            if have_below >= 0.95*weyl_est and refines > 5:
+            if have_below >= 0.99*weyl_est and refines > 5:
                 # heuristic: close enough; you can tighten to 0.99 if you prefer
                 print("[stop] below-E_CUT coverage consistent with Weyl; stopping.")
                 break
