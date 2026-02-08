@@ -21,10 +21,10 @@ from matplotlib import cm
 
 # ========= USER CONFIG (edit these) =========
 # Path to eigenpairs database (.h5)
-H5_PATH = r"eigensdf/doublewell/final/eigenpairs.h5"
+H5_PATH = r"eigensdf/singleresonances/final_small/eigenpairs_complex.h5"
 
 # Index of the eigenstate in the database (0-based)
-MODE_INDEX = 923
+MODE_INDEX = 295
 
 # If True: interpret MODE_INDEX after sorting by energy key (Re(E) or |E|)
 USE_SORTED_INDEX = True
@@ -34,7 +34,7 @@ SORT_KEY = "real"  # "real" or "abs"
 OUT_PNG = None
 
 # Geometry fallback (used only if geometry_used.npz is missing)
-SDF_FALLBACK_PATH = r"potentials/double_potential_final.npz"
+SDF_FALLBACK_PATH = r"potentials/isolated_small.npz"
 
 # What to render
 RENDER_REAL = False
@@ -45,18 +45,20 @@ OUTPUT_PIXELS = 1024      # set to 1024 to match a 1024x1024 grid nicely
 FIG_DPI = 256             # together with OUTPUT_PIXELS this yields an exact pixel size
 FIGSIZE = None            # None -> computed from OUTPUT_PIXELS (or from grid if OUTPUT_PIXELS is None)
 SAVE_TIGHT = False        # False preserves exact pixel size; True may change output size
-SHOW_TITLE = False        # titles change layout/pixels; keep False for exact-size renders
+SHOW_TITLE = True       # titles change layout/pixels; keep False for exact-size renders
 ALPHA_OVERLAY = 0.35   # blend eigenimage over background (0..1)
 SHOW_BACKGROUND = True
-INTERPOLATION = "bilinear"  # "bilinear" helps avoid jagged pixel edges in the visualization
+# Match render_all_modes2: don't override matplotlib interpolation defaults
+INTERPOLATION = None  # set e.g. "bilinear" if you want smoother pixels
 
-# Background colors (outside stays black; interior can be styled to “pop” more than white)
-BG_OUT_RGB = (0, 0, 0)          # disallowed region stays black
-BG_IN_RGB = (70, 80, 95)        # mid-slate interior (lighter but not white). Try (55,65,80) or (90,100,115)
-BG_EDGE_SOFTEN = True           # use SDF smoothing if phi is available
+# Background (match render_all_modes2): bg = 255 * occ stacked into RGB
+BG_MODE = "occ_grayscale"  # "occ_grayscale" (render_all_modes2) or "custom_rgb"
+BG_OUT_RGB = (0, 0, 0)          # used only for BG_MODE="custom_rgb"
+BG_IN_RGB = (255, 255, 255)     # used only for BG_MODE="custom_rgb"
+BG_EDGE_SOFTEN = False          # render_all_modes2 uses hard occupancy (no SDF smoothing)
 
-# Smooth wall rendering (recommended)
-DRAW_BOUNDARY_CONTOUR = True
+# render_all_modes2 does not draw a phi=0 contour by default
+DRAW_BOUNDARY_CONTOUR = False
 BOUNDARY_COLOR = "#111111"
 BOUNDARY_LW = 1.0
 
@@ -70,15 +72,16 @@ BOUNDARY_LW = 1.0
 # How to color the density overlay:
 #   - "cmap": use PROB_CMAP for coloring
 #   - "mono": use a single RGB color, with density controlling transparency (very “pop”)
-PROB_STYLE = "mono"  # "mono" or "cmap"
+PROB_STYLE = "cmap"  # "mono" or "cmap"
 
-PROB_CMAP = "plasma"
+PROB_CMAP = "inferno"
 PROB_PCT_HI = 99.5
 PROB_GAMMA = 0.60
 
-# Make low density "uncolored" (transparent) and only color high density.
-# This threshold is applied after the percentile+gamma normalization step (so it is in [0,1]).
-PROB_SHOW_MIN = 0.10          # higher -> only color peaks (more contrast)
+# Probability blending (match render_all_modes2): constant alpha everywhere
+PROB_BLEND_MODE = "constant"  # "constant" (render_all_modes2) or "density_alpha" (legacy)
+# The following are used only for PROB_BLEND_MODE="density_alpha"
+PROB_SHOW_MIN = 0.05          # higher -> only color peaks (more contrast)
 PROB_ALPHA_GAMMA = 2.2        # >1 makes only the very top densities opaque (more pop)
 
 # Used only for PROB_STYLE="mono"
@@ -135,8 +138,8 @@ def _unpack(vec: np.ndarray, allowed: np.ndarray, shape):
 def _format_energy(E):
     # print precise complex/real value
     if np.iscomplexobj(E):
-        return f"{E.real:.17g}{E.imag:+.17g}j"
-    return f"{float(E):.17g}"
+        return f"{E.real:.5g}{E.imag:+.5g}j"
+    return f"{float(E):.5g}"
 
 
 def _make_background_rgb(occ, allowed, phi=None, absorber=None, imag_profile=None):
@@ -152,18 +155,24 @@ def _make_background_rgb(occ, allowed, phi=None, absorber=None, imag_profile=Non
     if not SHOW_BACKGROUND:
         return None
 
-    if (phi is not None) and BG_EDGE_SOFTEN:
-        # Smooth transition across wall over ~1 pixel
-        w = 1.0
-        occ_smooth = np.clip(0.5 + (phi / (2.0 * w)), 0.0, 1.0).astype(np.float32)
+    if BG_MODE == "occ_grayscale":
+        # Exactly like render_all_modes2:
+        #   bg = (255*np.dstack([occ,occ,occ])).astype(np.uint8)
+        o = np.asarray(occ, dtype=np.float32)
+        bg = (255.0 * np.dstack([o, o, o])).astype(np.uint8)
     else:
-        # fallback: hard mask
-        occ_smooth = occ.astype(np.float32)
+        if (phi is not None) and BG_EDGE_SOFTEN:
+            # Smooth transition across wall over ~1 pixel
+            w = 1.0
+            occ_smooth = np.clip(0.5 + (phi / (2.0 * w)), 0.0, 1.0).astype(np.float32)
+        else:
+            # fallback: hard mask
+            occ_smooth = occ.astype(np.float32)
 
-    in_rgb = np.array(BG_IN_RGB, dtype=np.float32).reshape(1, 1, 3)
-    out_rgb = np.array(BG_OUT_RGB, dtype=np.float32).reshape(1, 1, 3)
-    a = np.clip(occ_smooth, 0.0, 1.0)[..., None]  # inside weight
-    bg = (1.0 - a) * out_rgb + a * in_rgb
+        in_rgb = np.array(BG_IN_RGB, dtype=np.float32).reshape(1, 1, 3)
+        out_rgb = np.array(BG_OUT_RGB, dtype=np.float32).reshape(1, 1, 3)
+        a = np.clip(occ_smooth, 0.0, 1.0)[..., None]  # inside weight
+        bg = (1.0 - a) * out_rgb + a * in_rgb
 
     if SHOW_ABSORBER_OVERLAY and (absorber is not None or imag_profile is not None):
         if imag_profile is not None:
@@ -268,19 +277,26 @@ def main():
 
     if bg is not None:
         if RENDER_PROB:
-            # Per-pixel transparency: low density shows NO coloring; high density is colored.
-            t0 = float(np.clip(PROB_SHOW_MIN, 0.0, 0.999999))
-            a = np.clip((p - t0) / (1.0 - t0), 0.0, 1.0)
-            if PROB_ALPHA_GAMMA != 1.0:
-                a = a ** float(PROB_ALPHA_GAMMA)
-            a = (float(ALPHA_OVERLAY) * a).astype(np.float32)
-            blend = ((1.0 - a)[..., None] * bg.astype(np.float32) + a[..., None] * img.astype(np.float32)).astype(np.uint8)
+            if PROB_BLEND_MODE == "constant":
+                # Match render_all_modes2: uniform alpha blend everywhere
+                blend = (ALPHA_OVERLAY * img + (1 - ALPHA_OVERLAY) * bg).astype(np.uint8)
+            else:
+                # Per-pixel transparency: low density shows NO coloring; high density is colored.
+                t0 = float(np.clip(PROB_SHOW_MIN, 0.0, 0.999999))
+                a = np.clip((p - t0) / (1.0 - t0), 0.0, 1.0)
+                if PROB_ALPHA_GAMMA != 1.0:
+                    a = a ** float(PROB_ALPHA_GAMMA)
+                a = (float(ALPHA_OVERLAY) * a).astype(np.float32)
+                blend = ((1.0 - a)[..., None] * bg.astype(np.float32) + a[..., None] * img.astype(np.float32)).astype(np.uint8)
         else:
             blend = (ALPHA_OVERLAY * img + (1 - ALPHA_OVERLAY) * bg).astype(np.uint8)
     else:
         blend = img
 
-    ax.imshow(blend, origin="lower", interpolation=INTERPOLATION)
+    if INTERPOLATION is None:
+        ax.imshow(blend, origin="lower")
+    else:
+        ax.imshow(blend, origin="lower", interpolation=INTERPOLATION)
 
     # Draw a smooth wall boundary from phi=0 (if available)
     if DRAW_BOUNDARY_CONTOUR and (phi is not None):
@@ -289,8 +305,8 @@ def main():
 
     if SHOW_TITLE:
         title = f"#{idx}  E={_format_energy(E)}"
-        if sorted_rank is not None:
-            title = f"(sorted #{sorted_rank}) " + title
+        # if sorted_rank is not None:
+        #     title = f"(sorted #{sorted_rank}) " + title
         ax.set_title(title, fontsize=10, pad=10)
 
     if OUT_PNG is None:

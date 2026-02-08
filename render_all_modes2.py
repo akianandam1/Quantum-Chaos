@@ -4,9 +4,9 @@
 # Works with HDF5 (eigenpairs.h5) or NPZ shards (manifest.json).
 
 # ========= USER PARAMS =========
-OUT_DIR         = "eigensdf/doublewell/final"                      # where your store lives
-OUTPUT_DIR = "eigensdf/doublewell/final/renders2"                    # where we output images
-SDF_PATH        = "potentials/double_potential_final.npz"     # fallback if geometry_used.npz not present
+OUT_DIR         = "eigensdf/doublewell/final2"                      # where your store lives
+OUTPUT_DIR = "eigensdf/doublewell/final2/renders"                    # where we output images
+SDF_PATH        = "potentials/final_potential.npz"     # fallback if geometry_used.npz not present
 CONTOURS_PATH   = None  # e.g., "eigs_out/geometry_sdf_contours.npz" or None
 
 # What to render

@@ -33,33 +33,46 @@ import matplotlib.pyplot as plt
 
 CONFIG = {
     # SDF and labels
-    "NPZ_PATH": r"potentials/final_potential.npz",  # SDF npz (phi, allowed)
-    "LABEL_PNG": r"potentials/labelled_final_potential.png",  # RGB-labelled regions
-    "GEOM_PREVIEW_PNG": r"eigensdf/doublewell/final2/roland/region_masks_preview.png",
+    "NPZ_PATH": r"potentials/channel2.npz",  # SDF npz (phi, allowed)
+    "LABEL_PNG": r"potentials/labeled_channel2.png",  # RGB-labelled regions
+    "GEOM_PREVIEW_PNG": r"eigensdf/doublewell/channel2/roland/region_masks_preview.png",
 
     # Eigenpairs
-    "H5_PATH": r"eigensdf/doublewell/final2/eigenpairs.h5",
-    "OUT_DIR": r"eigensdf/doublewell/final2/roland",
+    "H5_PATH": r"eigensdf/doublewell/channel2/eigenpairs.h5",
+    "OUT_DIR": r"eigensdf/doublewell/channel2/roland",
 
     # Eigenstate processing
     # START_INDEX is now interpreted in *sorted-energy* order:
     #   0 means "start from the absolute ground state",
     #   100 means "skip the lowest 100 energies and start from the 101st".
-    "START_INDEX": 100,    # first eigenstate rank (0-based) in energy-sorted order
+    "START_INDEX": 0,    # first eigenstate rank (0-based) in energy-sorted order
     "WINDOW_SIZE": 100,      # states per window (in sorted order)
     "NUM_WINDOWS": 498,      # number of windows
     "MIN_REL_FRAC": 0.0,    # optional crude chaoticity filter (0 to disable)
 
     # Effective channel width (in grid units / pixels)
     # Measure this by hand (e.g. count allowed pixels across the entrance in your PNG).
-    "W_EFF": 64.0,
+    # channel 1 (thinchannel): 22
+    # channel 2: 32
+    # channel 3( final_channel): 46
+    # channel 7 (large): 86
+   
+    "W_EFF": 32.0,
 
     # Printing
     "PRINT_EVERY": 10,     # print x,w12 for every N-th state (in sorted rank)
 
+    # w_12 definition
+    # - "ratio": area-corrected product (can exceed 1 if a state concentrates more than uniform)
+    #       w12_ratio = (p_small/mu_small_cl) * (p_large/mu_large_cl)
+    # - "bounded": bounded "splitness" metric in [0,1]
+    #       w12_bounded = 4 * p_small * p_large
+    #   Note: this does NOT correct for unequal region areas (it cancels that correction).
+    "W12_MODE": "ratio",   # "ratio" or "bounded"
+
     # Output
-    "PLOT_PATH": r"eigensdf/doublewell/final2/roland/partial_barrier_curve.png",
-    "DATA_OUT_NPZ": r"eigensdf/doublewell/final2/roland/partial_barrier_data.npz",
+    "PLOT_PATH": r"eigensdf/doublewell/channel2/roland/partial_barrier_curve.png",
+    "DATA_OUT_NPZ": r"eigensdf/doublewell/channel2/roland/partial_barrier_data.npz",
 }
 
 # =======================================================
@@ -202,7 +215,8 @@ def process_window_energy_x_w12_sorted(hf,
                                        W_eff,
                                        min_rel_frac=0.0,
                                        print_every=200,
-                                       sorted_offset=0):
+                                       sorted_offset=0,
+                                       w12_mode="ratio"):
     """
     Process a window of eigenstates given by window_sorted_indices, which is an
     array of *original* eigenstate indices, but ordered so that the
@@ -287,7 +301,15 @@ def process_window_energy_x_w12_sorted(hf,
 
         r1 = p_small / mu_small_cl
         r2 = p_large / mu_large_cl
-        w12 = r1 * r2
+        w12_ratio = r1 * r2
+        w12_bounded = 4.0 * p_small * p_large
+
+        if w12_mode == "bounded":
+            w12 = w12_bounded
+        elif w12_mode == "ratio":
+            w12 = w12_ratio
+        else:
+            raise ValueError(f"Unknown w12_mode={w12_mode!r}. Use 'ratio' or 'bounded'.")
 
         # x_j = N_perp_max(E_j) = W_eff * sqrt(E_j) / pi
         k_j = np.sqrt(E_j)   # assuming -∇^2 ψ = E ψ
@@ -296,8 +318,11 @@ def process_window_energy_x_w12_sorted(hf,
             x_j = 0.0
 
         if print_every > 0 and (sorted_rank % print_every == 0):
-            print(f"  sorted_rank {sorted_rank} (orig {orig_idx}): x(E)={x_j:.3f}, "
-                  f"w12={w12:.3f}, E={E_j:.3f}")
+            print(
+                f"  sorted_rank {sorted_rank} (orig {orig_idx}): x(E)={x_j:.3f}, "
+                f"w12={w12:.3f} [{w12_mode}], "
+                f"(ratio={w12_ratio:.3f}, bounded={w12_bounded:.3f}), E={E_j:.3f}"
+            )
 
         w_list.append(w12)
         x_list.append(x_j)
@@ -396,7 +421,8 @@ def main():
             W_eff,
             min_rel_frac=min_rel_frac,
             print_every=print_every,
-            sorted_offset=sorted_start  # for pretty printing
+            sorted_offset=sorted_start,  # for pretty printing
+            w12_mode=str(cfg.get("W12_MODE", "ratio")).strip().lower(),
         )
 
         if E_arr.size == 0:

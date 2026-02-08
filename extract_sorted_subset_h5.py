@@ -26,13 +26,19 @@ E_CUT = 3.0
 # For complex evals: cutoff/sort key
 USE_REAL_PART = True  # True -> use Re(E), False -> use |E|
 
+# Copy ordering (performance vs convenience)
+# - "energy": output is sorted by energy key (convenient, but can be slower due to nonlocal reads)
+# - "source": output keeps increasing original indices (often faster I/O). Still enforces E_CUT.
+COPY_ORDER = "energy"  # "energy" or "source"
+
 # Output
 OUT_H5_PATH = None  # None -> next to input: <basename>_E<=X_sorted.h5
 COPY_GEOMETRY_USED = True  # if geometry_used.npz exists next to input, copy it too
 WRITE_MANIFEST = True
 
 # Performance
-COPY_CHUNK = 256  # number of eigenvectors (columns) per read/write chunk
+COPY_CHUNK = 16  # number of eigenvectors (columns) per read/write chunk
+PROGRESS_EVERY = 1  # print progress every N chunks (1 = every chunk)
 # ===========================================
 
 
@@ -84,14 +90,25 @@ def main() -> None:
     if idx.size == 0:
         raise RuntimeError(f"No eigenvalues found with key(E) <= {E_CUT}.")
 
-    # sort selected indices by key
+    # choose output ordering (selection is always enforced first!)
+    if COPY_ORDER == "source":
+        # increasing original index order (often fastest reads)
+        order = np.sort(idx)
+        out_sorted = False
+    elif COPY_ORDER == "energy":
+        # sorted by energy key
     order = idx[np.argsort(key[idx])]
+        out_sorted = True
+    else:
+        raise ValueError(f"Unknown COPY_ORDER={COPY_ORDER!r}. Use 'energy' or 'source'.")
+
     K_out = int(order.size)
 
     print(f"[in]  {in_path}")
     print(f"[out] {out_path}")
     print(f"[shape] n={n}, K_in={K}")
     print(f"[select] key(E) <= {E_CUT}: K_out={K_out}")
+    print(f"[order] COPY_ORDER={COPY_ORDER} ({'energy-sorted' if out_sorted else 'source-index order'})")
 
     # --- create output H5 ---
     # Overwrite if exists
@@ -117,21 +134,42 @@ def main() -> None:
 
         # copy evecs in chunks; h5py requires increasing indices when fancy-indexing
         chunk = max(int(COPY_CHUNK), 1)
+        progress_every = max(int(PROGRESS_EVERY), 1)
+        bytes_per_elem = int(np.dtype(evecs_dtype).itemsize)
+        bytes_per_vec = int(n) * bytes_per_elem
+        t_copy0 = time.time()
         for start in range(0, K_out, chunk):
             stop = min(start + chunk, K_out)
             idxs = order[start:stop]
 
-            # read from src using increasing indices
+            if out_sorted:
+                # Even though `order` is energy-sorted, the source indices can be non-monotone.
+                # Read from src using increasing indices, then permute back.
             sort_perm = np.argsort(idxs)
             idxs_sorted = idxs[sort_perm]
             V_sorted = np.array(src["evecs"][:, idxs_sorted], dtype=evecs_dtype)
             inv_perm = np.argsort(sort_perm)
             V = V_sorted[:, inv_perm]
+            else:
+                # `order` is increasing source indices, so we can read directly.
+                V = np.array(src["evecs"][:, idxs], dtype=evecs_dtype)
 
             dst["evecs"][:, start:stop] = V
 
-            if (start == 0) or (stop == K_out) or ((start // chunk) % 10 == 0):
-                print(f"[copy] {stop}/{K_out} eigenvectors")
+            # live progress (every chunk by default)
+            done = int(stop)
+            chunks_done = (start // chunk) + 1
+            if (done == K_out) or (chunks_done % progress_every == 0) or (start == 0):
+                elapsed = max(time.time() - t_copy0, 1e-9)
+                copied_bytes = done * bytes_per_vec
+                mb_s = (copied_bytes / (1024.0 * 1024.0)) / elapsed
+                eta_s = (elapsed * (K_out - done) / max(done, 1))
+                print(
+                    f"[copy] {done}/{K_out} eigenvectors | "
+                    f"{copied_bytes / (1024.0**3):.2f} GiB | "
+                    f"{mb_s:.1f} MiB/s | ETA {eta_s/60.0:.1f} min",
+                    flush=True,
+                )
 
         dst.flush()
 

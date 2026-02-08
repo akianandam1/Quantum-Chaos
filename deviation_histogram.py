@@ -18,8 +18,8 @@ import matplotlib.pyplot as plt
 
 
 # ========= USER CONFIG (edit these) =========
-TITLE = "Eigenstate Deviation Above Ergodic Baseline"  # e.g. "Deviation above ergodic baseline"
-X_LABEL = "Percent above ergodic baseline"
+TITLE = "Eigenstate Deviation Above Classical Baseline"  # e.g. "Deviation above ergodic baseline"
+X_LABEL = "Percent above classical baseline"
 Y_LABEL = "Percent of states"
 
 # Bin centers (or bin labels) for the x-axis, in percent.
@@ -32,10 +32,15 @@ X_BINS_PERCENT = [10, 20, 30, 40, 50, 60]
 Y_PERCENT = None
 # Y_PERCENT = [12.5, 18.0, 22.0, 20.5, 17.0, 10.0]
 
-# Original COUNTS = [30542, 17339, 9937, 6027, 3933, 2548]
-COUNTS = [9076, 7801, 6235, 4625, 3235, 2550]
-#Original TOTAL_STATES = 50893  # e.g. 1000
-TOTAL_STATES = 10240  # e.g. 1000
+#Original 
+COUNTS = [30542, 17339, 9937, 6027, 3933, 2548]
+
+#COUNTS = [9076, 7801, 6235, 4625, 3235, 2550]
+
+#Original 
+TOTAL_STATES = 50893  # e.g. 1000
+
+#TOTAL_STATES = 10240  # e.g. 1000
 
 # Appearance / output
 COLOR = "#2C7FB8"        # blue
@@ -43,7 +48,7 @@ EDGE_COLOR = "#1b1b1b"
 BAR_ALPHA = 0.92
 FIGSIZE = (7.0, 4.2)
 DPI = 300
-OUTPUT_PATH = "eigensdf/doublewell/finalobstacles/deviation_histogram.png"  # also consider .pdf for publication
+OUTPUT_PATH = "eigensdf/doublewell/final2/deviation_histogram.png"  # also consider .pdf for publication
 
 SHOW_VALUE_LABELS = True
 VALUE_LABEL_FMT = "{:.1f}%"   # shown above each bar
@@ -157,6 +162,15 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+
+
+
+
+
+
+
+
 
 
 

@@ -23,9 +23,9 @@ from scipy.sparse.linalg import eigs, splu, LinearOperator
 
 
 # ========= USER PARAMS =========
-SDF_PATH       = "potentials/isolated_large.npz"         # (phi, allowed) from png_to_sdf
-ABSORBER_PNG   = "potentials/isolated_large_red.png"  # PNG with red absorber region
-OUT_DIR        = "eigensdf/singleresonances/final_large"
+SDF_PATH       = "potentials/isolated_small.npz"         # (phi, allowed) from png_to_sdf
+ABSORBER_PNG   = "potentials/isolated_small_red.png"  # PNG with red absorber region
+OUT_DIR        = "eigensdf/singleresonances/final_small"
 
 N_MODES        = 1000          # how many lowest modes to compute (by Re(E))
 IMAG_MAX       = 4.0          # maximum strength of imaginary potential W_max
@@ -34,7 +34,7 @@ RAMP_POWER     = 2.0          # ramp ~ (s^RAMP_POWER), s in [0,1]
 #   - "auto": infer white-side vs black-side per row (current behavior)
 #   - "right": W increases as x increases (toward +x)
 #   - "left":  W increases as x decreases (toward -x)
-RAMP_DIRECTION = "left"
+RAMP_DIRECTION = "right"
 
 PREVIEW_GEOM_PNG     = os.path.join(OUT_DIR, "geom_allowed.png")
 PREVIEW_ABS_PNG      = os.path.join(OUT_DIR, "absorber_mask.png")

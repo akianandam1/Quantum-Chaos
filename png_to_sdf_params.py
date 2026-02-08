@@ -1,9 +1,9 @@
 # Build a smooth signed-distance field (phi) from a black/white PNG (white=inside).
 
 # ===================== USER PARAMETERS =====================
-IMG_PATH        = "potentials/isolated_large.png"   # your PNG (white = allowed, black = wall)
-OUT_NPZ         = "potentials/isolated_large.npz"
-PREVIEW_PNG     = "potentials/isolated_large_sdf.png"
+IMG_PATH        = "potentials/channel4.png"   # your PNG (white = allowed, black = wall)
+OUT_NPZ         = "potentials/channel4.npz"
+PREVIEW_PNG     = "potentials/channel4_sdf.png"
 
 GRID_N          = 1024        # final solver grid (Ny = Nx)
 SUPERSAMPLE     = 24         # hi-res rasterization for smooth curves (16–24 is very clean)

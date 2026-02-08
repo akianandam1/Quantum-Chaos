@@ -20,12 +20,12 @@ import matplotlib.pyplot as plt
 
 # ========= USER CONFIG (edit these) =========
 # Provide one or two datasets. If H5_PATH_2 is None, only the first is plotted.
-H5_PATH_1 = r"eigensdf/singleresonances/trial1/eigenpairs_complex.h5"
-H5_PATH_2 = r"eigensdf/singleresonances/trial2/eigenpairs_complex.h5"  # e.g. r"eigensdf/singleresonances/trial2/eigenpairs_complex.h5"
-LABEL_1 = "dataset 1"
-LABEL_2 = "dataset 2"
-E_MIN = 0.047
-E_MAX = 0.049
+H5_PATH_1 = r"eigensdf/singleresonances/final_small/eigenpairs_complex.h5"
+H5_PATH_2 = r"eigensdf/singleresonances/final_large/eigenpairs_complex.h5"  # e.g. r"eigensdf/singleresonances/trial2/eigenpairs_complex.h5"
+LABEL_1 = "Isolated Small Well"
+LABEL_2 = "Isolated Large Well"
+E_MIN = 0.049
+E_MAX = 0.052
 
 # Plot options
 SORT_BY_ENERGY = True   # sort by Re(E) (only affects draw order)
@@ -39,6 +39,7 @@ COLOR_2 = "tab:orange"
 
 # Labels next to each point
 ANNOTATE_POINTS = True
+LABEL_BY_SORTED_ENERGY = True  # if True, label points by rank in increasing energy (Re(E)) instead of dataset index
 ANNOTATE_FONT_SIZE = 7
 ANNOTATE_OFFSET = (3, 2)     # pixels (x,y)
 ANNOTATE_MAX = None           # safety cap; set to None to annotate everything
@@ -53,6 +54,18 @@ def load_evals(h5_path: str) -> np.ndarray:
         if "evals" not in f:
             raise KeyError(f"Dataset 'evals' not found in {h5_path}")
         return np.array(f["evals"][:])
+
+
+def _energy_rank_by_re(evals: np.ndarray) -> np.ndarray:
+    """
+    Returns an array `rank` such that rank[i] is the position of evals[i] in the
+    increasing-Re(E) ordering (0 = smallest Re(E)).
+    """
+    key = np.real(evals).astype(np.float64, copy=False)
+    order = np.argsort(key)
+    rank = np.empty(order.size, dtype=np.int64)
+    rank[order] = np.arange(order.size, dtype=np.int64)
+    return rank
 
 
 def select_complex_plane_points(evals: np.ndarray, emin: float, emax: float):
@@ -80,6 +93,7 @@ def main() -> None:
         raise ValueError("H5_PATH_1 must be set.")
 
     evals1 = load_evals(H5_PATH_1)
+    rank1 = _energy_rank_by_re(evals1) if LABEL_BY_SORTED_ENERGY else None
     idx1, x1, y1 = select_complex_plane_points(evals1, emin, emax)
     if x1.size == 0:
         raise RuntimeError(f"[{LABEL_1}] No eigenvalues found with Re(E) in [{emin}, {emax}].")
@@ -87,11 +101,13 @@ def main() -> None:
     has_second = H5_PATH_2 is not None and str(H5_PATH_2).strip() != ""
     if has_second:
         evals2 = load_evals(H5_PATH_2)
+        rank2 = _energy_rank_by_re(evals2) if LABEL_BY_SORTED_ENERGY else None
         idx2, x2, y2 = select_complex_plane_points(evals2, emin, emax)
         if x2.size == 0:
             raise RuntimeError(f"[{LABEL_2}] No eigenvalues found with Re(E) in [{emin}, {emax}].")
     else:
         evals2 = None
+        rank2 = None
         idx2 = np.array([], dtype=np.int64)
         x2, y2 = np.array([], dtype=float), np.array([], dtype=float)
 
@@ -123,8 +139,9 @@ def main() -> None:
     if ANNOTATE_POINTS:
         max1 = x1.size if ANNOTATE_MAX is None else min(int(ANNOTATE_MAX), x1.size)
         for i in range(max1):
+            lab = rank1[int(idx1[i])] if (rank1 is not None) else int(idx1[i])
             plt.annotate(
-                str(int(idx1[i])),
+                str(int(lab)),
                 (x1[i], y1_plot[i]),
                 textcoords="offset points",
                 xytext=ANNOTATE_OFFSET,
@@ -134,8 +151,9 @@ def main() -> None:
         if has_second:
             max2 = x2.size if ANNOTATE_MAX is None else min(int(ANNOTATE_MAX), x2.size)
             for i in range(max2):
+                lab = rank2[int(idx2[i])] if (rank2 is not None) else int(idx2[i])
                 plt.annotate(
-                    str(int(idx2[i])),
+                    str(int(lab)),
                     (x2[i], y2_plot[i]),
                     textcoords="offset points",
                     xytext=ANNOTATE_OFFSET,

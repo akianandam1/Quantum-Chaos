@@ -13,7 +13,7 @@ CONFIG = {
     "LABEL_PNG": r"potentials/labelled_final_potential.png",# if manual_label_png: 0 bg, 1 small, 2 channel, 3 large (or pure RGB)
     "CHANNEL_RADIUS": 9.0,               # for component_split only
 
-    "OUT_DIR": r"eigensdf/doublewell/final",
+    "OUT_DIR": r"eigensdf/doublewell/final2",
     "PREVIEW": True,                     # save region_masks.png
 }
 

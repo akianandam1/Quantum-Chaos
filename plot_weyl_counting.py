@@ -27,7 +27,7 @@ SDF_FALLBACK_PATH = r"potentials/final_potential.npz"
 
 # Energy window to show (applied to Re(E) if complex)
 E_MIN = 0.0
-E_MAX = 4.0    # set None to use max available
+E_MAX = 3.0    # set None to use max available
 
 # Plotting options
 USE_REAL_PART = True   # for complex evals: use Re(E)
@@ -154,5 +154,14 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+
+
+
+
+
+
+
+
 
 
